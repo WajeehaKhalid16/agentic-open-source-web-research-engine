@@ -13,23 +13,20 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Local environment configuration
+# Environment and secrets
 .env
 *.env.local
 
-# Local databases and SQLite files
+# Local databases
+research.db
 *.db
 *.sqlite
 *.sqlite3
-research.db
 
-# Generated reports and exports
+# Generated research outputs
 reports/
 exports/
-*.log
 
-# IDE and OS files
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
+# Frontend dependencies and builds
+frontend/node_modules/
+frontend/dist/Test-Path .\reports
