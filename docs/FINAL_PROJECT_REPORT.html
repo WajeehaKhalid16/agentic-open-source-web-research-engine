@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Final Technical Report - Agentic Open-Source Web Research Engine</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 20mm 15mm 20mm 15mm;
+        }
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+            font-size: 10pt;
+            line-height: 1.55;
+            color: #23131E;
+            background: #FFFFFF;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2, h3, h4 {
+            color: #23131E;
+            font-family: Georgia, serif;
+            page-break-after: avoid;
+        }
+        h1 {
+            font-size: 18pt;
+            border-bottom: 2px solid #FC9A64;
+            padding-bottom: 6px;
+            margin-top: 24px;
+        }
+        h2 {
+            font-size: 13pt;
+            border-bottom: 1px solid #FDE0B8;
+            padding-bottom: 4px;
+            margin-top: 20px;
+        }
+        h3 {
+            font-size: 11pt;
+            margin-top: 14px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: 8.5pt;
+            page-break-inside: avoid;
+        }
+        th, td {
+            border: 1px solid #FDE0B8;
+            padding: 5px 7px;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background-color: #23131E;
+            color: #FFFFFF;
+            font-weight: 600;
+        }
+        tr:nth-child(even) {
+            background-color: #FEF4E6;
+        }
+        code {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 8.5pt;
+            background-color: #FEF4E6;
+            padding: 1px 4px;
+            border-radius: 3px;
+            border: 1px solid #FDE0B8;
+        }
+        pre {
+            background-color: #23131E;
+            color: #FFF7EC;
+            padding: 10px 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 8pt;
+            page-break-inside: avoid;
+        }
+        pre code {
+            background: transparent;
+            border: none;
+            color: #FFF7EC;
+            padding: 0;
+        }
+        blockquote {
+            border-left: 4px solid #FC9A64;
+            background-color: #FEF4E6;
+            margin: 10px 0;
+            padding: 8px 12px;
+            font-style: italic;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #FDE0B8;
+            margin: 18px 0;
+        }
+        p strong {
+            color: #23131E;
+        }
+    </style>
+</head>
+<body>
+<h1 id="project-evaluation-technical-audit-report">Project Evaluation &amp; Technical Audit Report</h1>
+<hr />
+<h1 id="agentic-open-source-web-research-engine">Agentic Open-Source Web Research Engine</h1>
+<h3 id="an-autonomous-information-retrieval-citation-verification-and-grounded-report-synthesis-system">An Autonomous Information Retrieval, Citation Verification, and Grounded Report Synthesis System</h3>
+<p><strong>Student Developer:</strong> Wajeeha Khalid<br />
+<strong>Repository Working Directory:</strong> <code>agentic-web-research-engine/</code><br />
+<strong>License:</strong> MIT License  </p>
+<hr />
+<h2 id="2-abstract">2. Abstract</h2>
+<p>This technical report presents an evaluation and engineering audit of the <strong>Agentic Open-Source Web Research Engine</strong>, a locally deployable software prototype designed to automate open-web discovery, web page crawling, text extraction, passage-level indexing, retrieval ranking, and citation-audited report synthesis. The system addresses common shortcomings of generative search systems, including lack of retrieval transparency, reliance on proprietary cloud infrastructure, and citation fabrication.</p>
+<p>Built with <strong>Python 3.13</strong>, <strong>FastAPI</strong>, <strong>HTTPX</strong>, <strong>Trafilatura</strong>, <strong>LXML</strong>, <strong>SQLite</strong>, and <strong>React 19</strong>, the architecture implements an inspectable eight-stage workflow. Primary web discovery is conducted through a zero-credential <strong>DuckDuckGo</strong> search scraper with fallback handling, complemented by an RSS/Atom news aggregator and optional <strong>SearXNG</strong> support. Crawling incorporates pre-flight Server-Side Request Forgery (SSRF) checks and redirect validation. Retrieved texts are deduplicated via canonical URL matching, SHA-256 content hashing, and 3-word Jaccard shingling, then chunked into paragraph-bounded passages with character offset tracking. Relevance scoring is executed through an uncompiled, pure-Python <strong>Okapi BM25</strong> implementation with domain-credibility weighting. Report synthesis supports local <strong>Ollama</strong> LLM generation with a deterministic extractive fallback that directly compiles retrieved passages into structured findings. An independent <strong>CitationVerifier</strong> audits every citation against stored records for document existence, URL match, passage resolution, and lexical token overlap.</p>
+<p>Empirical testing confirmed that all 27 automated backend unit and integration tests pass cleanly in an offline environment with mocked network boundaries, and the React frontend builds with zero compilation errors. This report assesses the implemented system against the original 3-week internship proposal, documents architectural adjustments necessitated by host environment limitations (specifically the substitution of SearXNG with DuckDuckGo following Docker daemon initialization failures), and details technical constraints.</p>
+<hr />
+<h2 id="3-introduction">3. Introduction</h2>
+<h3 id="31-background">3.1 Background</h3>
+<p>Information synthesis across the World Wide Web requires search query formulation, examination of search result pages, manual traversal of links, parsing of long-form articles, cross-comparison of conflicting accounts, and collation of cited summaries. In academic, journalistic, and intelligence research, the reliability of a final summary depends strictly on whether assertions can be verified against primary documents.</p>
+<p>While commercial retrieval-augmented generation (RAG) tools and search-enabled large language models (LLMs) partially automate this process, they introduce notable risks:
+1. <strong>Opaque Intermediate Steps:</strong> Users cannot inspect raw HTTP responses, document chunk boundaries, filtering thresholds, or ranking algorithms.
+2. <strong>Citation Mismatch:</strong> Generative models frequently produce syntactically valid footnotes that link to irrelevant homepages, broken URLs, or text passages that do not substantiate the claim.
+3. <strong>Proprietary Dependencies:</strong> Many implementations require paid search APIs, hosted vector databases, and closed-source LLMs, restricting deployment in privacy-sensitive or cost-constrained environments.</p>
+<h3 id="32-problem-statement">3.2 Problem Statement</h3>
+<p>The objective of this project is to develop an open-source, inspectable web research assistant capable of accepting natural-language queries, planning search variants, discovering public web and news sources without paid APIs, safely retrieving permissible HTML, extracting text and metadata, ranking evidence using transparent information retrieval metrics, generating structured reports, and auditing all citations against stored textual passages.</p>
+<h3 id="33-motivation">3.3 Motivation</h3>
+<p>The primary motivation is engineering transparency and epistemic verifiability. Rather than trusting an opaque model to summarize retrieved documents, an open research engine must maintain full provenance: the system should track what was queried, which URLs were visited, what text was extracted, which exact byte ranges formed each passage, and how closely each asserted claim aligns with its cited text.</p>
+<h3 id="34-project-objectives">3.4 Project Objectives</h3>
+<ol>
+<li><strong>Automated Search Planning &amp; Discovery:</strong> Generate multiple query variants and retrieve candidate links from public search engines and news feeds without paid API keys.</li>
+<li><strong>Defensive Web Crawling:</strong> Retrieve web content while enforcing multi-hop SSRF validation, size caps, and content-type filtering.</li>
+<li><strong>Text Extraction &amp; Deduplication:</strong> Clean raw HTML into structured text using Trafilatura, segment content into stable passages, and eliminate duplicate articles.</li>
+<li><strong>Transparent Ranking:</strong> Rank passage relevance using an explainable Okapi BM25 algorithm combined with transparent domain-credibility weighting.</li>
+<li><strong>Grounded Report Synthesis:</strong> Assemble structured findings linked to specific passage IDs using local LLM inference or deterministic extractive compilation.</li>
+<li><strong>Citation Auditing:</strong> Verify every claim-level citation against stored database records, distinguishing structural validity from lexical token overlap.</li>
+<li><strong>Interactive User Interface:</strong> Provide a single-page web application offering search controls, real-time pipeline telemetry via Server-Sent Events (SSE), and a synchronized evidence inspection drawer.</li>
+</ol>
+<hr />
+<h2 id="4-original-project-requirements">4. Original Project Requirements</h2>
+<p>The foundational guidelines for this project were outlined in the 3-week internship proposal titled <em>Agentic Open-Source Web Research Engine: Search, crawl, verify, synthesize, and cite current web and news information</em> (August 2026).</p>
+<h3 id="41-summary-of-original-assignment">4.1 Summary of Original Assignment</h3>
+<p>The assignment was planned as a 15-working-day development effort by a single student developer. The core constraints included:
+- Implementation in Python 3.11+ using exclusively open-source components.
+- Zero reliance on paid commercial APIs for search, scraping, vector storage, or LLM inference.
+- Deployment capability on a local developer machine or via Docker Compose.
+- Coverage of public web articles and current news.
+- Output of referenced Markdown and HTML reports accompanied by test suites and architecture documentation.</p>
+<h3 id="42-expected-deliverables">4.2 Expected Deliverables</h3>
+<p>The project proposal identified the following expected deliverables:
+1. A Git repository containing clean source code, configuration files, <code>.env.example</code>, and an open-source license.
+2. A reproducible Docker Compose deployment configuration.
+3. An operational API and user interface supporting end-to-end research runs.
+4. An architecture document and design-decision log explaining architectural selections.
+5. Automated unit and integration tests executing independently of live web targets.
+6. Multi-format exportable deliverables (Markdown, HTML, JSON, JSONL, and manifest).
+7. Three demonstration queries illustrating general knowledge, current events, and conflicting evidence.</p>
+<h3 id="43-acceptance-criteria-grading-rubric">4.3 Acceptance Criteria &amp; Grading Rubric</h3>
+<p>The original proposal specified the following evaluation weights:
+- <strong>Search &amp; Coverage (15%):</strong> Multiple query variants, diverse results, and functioning date/news filters.
+- <strong>Crawling &amp; Extraction (15%):</strong> Clean text/metadata extraction, bounded budgets, and safe failure handling.
+- <strong>Agent Workflow (15%):</strong> Typed, bounded, inspectable state machine with guaranteed termination.
+- <strong>Evidence &amp; Citations (25%):</strong> Target of at least 90% of sampled factual claims supported by valid citations pointing to authentic text.
+- <strong>Quality &amp; Credibility (10%):</strong> Visible primary-source preferences, deduplication, and conflict identification.
+- <strong>Engineering Quality (10%):</strong> Modular code, configuration isolation, test coverage, and absence of committed secrets.
+- <strong>UX &amp; Documentation (5%):</strong> Clear query input, evidence inspection, and report export.
+- <strong>Responsible Operation (5%):</strong> SSRF protection, rate limiting, and prompt-injection defense.
+- <strong>Minimum Viable Pass Criterion:</strong> Successfully execute agreed test queries end-to-end with zero fabricated URLs or nonexistent evidence IDs.</p>
+<hr />
+<h2 id="5-scope-of-the-implemented-project">5. Scope of the Implemented Project</h2>
+<p>This section provides an objective breakdown of features that were fully completed, partially completed, or architecturally adapted during implementation.</p>
+<h3 id="51-features-completed">5.1 Features Completed</h3>
+<ul>
+<li><strong>Query Decomposition &amp; Planning:</strong> Algorithmic generation of subquestions covering direct queries, official data, news developments, and opposing viewpoints (<code>agent/nodes.py</code>).</li>
+<li><strong>Free Web Discovery (DuckDuckGo):</strong> Native HTTPX/LXML scraper targeting DuckDuckGo HTML and Lite endpoints with redirect unquoting and zero API key dependencies (<code>search/duckduckgo_client.py</code>).</li>
+<li><strong>RSS/Atom News Aggregation:</strong> Feed parser querying BBC, NYT, and NPR feeds with query keyword filtering (<code>search/news_client.py</code>).</li>
+<li><strong>Safe Web Ingestion:</strong> Multi-hop SSRF validation blocking private, loopback, link-local, and cloud metadata IP addresses (<code>crawl/policy.py</code>, <code>crawl/fetcher.py</code>).</li>
+<li><strong>Article &amp; Metadata Extraction:</strong> Integration of Trafilatura for main text extraction, title identification, and metadata extraction (<code>crawl/extractor.py</code>).</li>
+<li><strong>Content Deduplication:</strong> Three-tier deduplication covering canonical URLs, exact SHA-256 hashes, and 3-word Jaccard shingling (<code>retrieval/deduplication.py</code>).</li>
+<li><strong>Passage Chunking:</strong> Paragraph-boundary passage segmentation with start/end character offsets and content hashing (<code>retrieval/chunking.py</code>).</li>
+<li><strong>Okapi BM25 Ranking:</strong> Self-contained, pure-Python BM25 scoring with domain-credibility adjustments (<code>retrieval/ranking.py</code>).</li>
+<li><strong>Deterministic Extractive Synthesis:</strong> Compilation of top-ranked passages into structured thematic sections with citation identifiers (<code>report/writer.py</code>).</li>
+<li><strong>Citation Verification:</strong> Automated audit checking document presence, canonical URL consistency, passage resolution, and lexical token overlap (<code>evidence/verifier.py</code>).</li>
+<li><strong>Multi-Format Export Pipeline:</strong> Export of <code>report.md</code>, <code>report.html</code>, <code>report.json</code>, <code>sources.json</code>, <code>evidence.jsonl</code>, and <code>run_manifest.json</code> (<code>report/exporter.py</code>).</li>
+<li><strong>SQLite Storage &amp; Repository:</strong> Transactional schema storing runs, search results, documents, passages, evidence, and citations (<code>storage/database.py</code>, <code>storage/repository.py</code>).</li>
+<li><strong>FastAPI REST &amp; SSE Service:</strong> Endpoints for research execution, status inspection, historical run retrieval, and live telemetry streaming (<code>app/main.py</code>).</li>
+<li><strong>React 19 User Interface:</strong> Single-page frontend implementing search controls, live progress tracking, evidence drawer, citation audit view, and export actions (<code>frontend/</code>).</li>
+</ul>
+<h3 id="52-features-partially-implemented-or-operating-with-fallbacks">5.2 Features Partially Implemented or Operating with Fallbacks</h3>
+<ul>
+<li><strong>Local LLM Inference (Ollama):</strong> Implemented in <code>report/writer.py</code> to query <code>http://localhost:11434</code>. In developer environments where Ollama is offline or uninstalled, the system automatically falls back to deterministic extractive synthesis.</li>
+<li><strong>News Coverage:</strong> Current news discovery is functional via public RSS/Atom feeds, but lacks full historical coverage, date-range filtering, or GDELT integration.</li>
+<li><strong>Academic Mode:</strong> The interface provides an Academic search mode toggle. In the backend, academic domains (<code>.edu</code>, <code>arxiv.org</code>, <code>nih.gov</code>) receive a 1.2x credibility boost in BM25 ranking, and the frontend contains an <code>AcademicCard</code> component for rich metadata; however, no dedicated scholarly search API (e.g., Semantic Scholar or CrossRef) is integrated.</li>
+<li><strong>robots.txt Compliance:</strong> While User-Agent identification and crawl rate limits are implemented, automated per-domain <code>robots.txt</code> parsing is not formally wired into the fetch loop.</li>
+</ul>
+<h3 id="53-features-replaced-or-omitted">5.3 Features Replaced or Omitted</h3>
+<ul>
+<li><strong>SearXNG Replaced by DuckDuckGo as Primary:</strong> SearXNG was configured in <code>docker-compose.yml</code> and supported in <code>search/searxng_client.py</code>. Due to host Windows WSL2 / Docker daemon initialization failures, DuckDuckGo was engineered as the default search provider, with SearXNG retained as an optional setting.</li>
+<li><strong>Playwright Omitted:</strong> Headless browser automation was omitted to avoid bundling heavy browser binaries, prioritize sub-second crawling, and ensure compatibility with resource-constrained environments.</li>
+<li><strong>Dedicated Vector Store Omitted:</strong> Qdrant was replaced with unified SQLite storage and BM25 ranking, eliminating multi-service container overhead.</li>
+</ul>
+<pre><code class="language-mermaid">pie title Breakdown of Feature Implementation Scope
+    &quot;Fully Implemented Features&quot; : 75
+    &quot;Partially Implemented / Fallbacks&quot; : 17
+    &quot;Replaced / Architectural Adaptations&quot; : 8
+</code></pre>
+<hr />
+<h2 id="6-system-architecture">6. System Architecture</h2>
+<p>The architecture separates concerns into a stateful Python backend and a decoupled React client.</p>
+<pre><code class="language-mermaid">flowchart TD
+    subgraph Client[&quot;Presentation Layer (React 19 + TypeScript + Vite)&quot;]
+        UI_Home[Homepage: Query &amp; Filters]
+        UI_Live[Live Run View: 8-Stage Timeline &amp; SSE Feed]
+        UI_Results[Results View: Report Column &amp; Evidence Drawer]
+        UI_Audit[Citation Audit Table]
+    end
+
+    subgraph API[&quot;Ingress Layer (FastAPI)&quot;]
+        R_Post[&quot;POST /api/runs (202 Accepted)&quot;]
+        R_SSE[&quot;GET /api/runs/{id}/events (SSE)&quot;]
+        R_Get[&quot;GET /api/runs/{id}&quot;]
+        R_Data[&quot;GET /api/runs/{id}/sources | evidence | audit&quot;]
+        R_Export[&quot;GET /api/runs/{id}/export/{format}&quot;]
+    end
+
+    subgraph Workflow[&quot;Workflow Coordinator (ResearchWorkflow)&quot;]
+        N1[1. Scope &amp; Plan Node]
+        N2[2. Discovery Node]
+        N3[3. Fetch &amp; Extract Node]
+        N4[4. Deduplicate &amp; Rank Node]
+        N5[5. Synthesis Node]
+        N6[6. Verification Node]
+        N7[7. Export Node]
+    end
+
+    subgraph Connectors[&quot;External Connectors &amp; Processing Engines&quot;]
+        DDG[DuckDuckGo Scraper (Primary)]
+        RSS[Public RSS Feeds (News Client)]
+        SearXNG[SearXNG Container (Optional / Unverified in Host)]
+        SafeFetch[SafeFetcher &amp; SSRF Policy]
+        Traf[Trafilatura Extractor]
+        BM25[Okapi BM25 Ranking Engine]
+        Ollama[Ollama LLM (Optional / Fallback Enabled)]
+        Extractive[Extractive Deterministic Synthesis]
+    end
+
+    subgraph Storage[&quot;Persistence Layer&quot;]
+        DB[(SQLite: research.db)]
+        FS[Filesystem: reports/{run_id}/]
+    end
+
+    UI_Home --&gt;|Submit Search| R_Post
+    R_Post --&gt;|Dispatch Task| N1
+    R_SSE -.-&gt;|Stream Events| UI_Live
+    N1 --&gt; N2 --&gt; N3 --&gt; N4 --&gt; N5 --&gt; N6 --&gt; N7
+
+    N2 --&gt; DDG
+    N2 --&gt; RSS
+    N2 -.-&gt; SearXNG
+    N3 --&gt; SafeFetch --&gt; Traf
+    N4 --&gt; BM25
+    N5 --&gt; Ollama
+    N5 -.-&gt;|Fallback Path| Extractive
+
+    N1 &amp; N2 &amp; N3 &amp; N4 &amp; N5 &amp; N6 --&gt; DB
+    N7 --&gt; FS
+
+    UI_Results &amp; UI_Audit --&gt;|Fetch Ingested Data| R_Get &amp; R_Data &amp; R_Export
+    R_Get &amp; R_Data --&gt; DB
+    R_Export --&gt; FS
+</code></pre>
+<h3 id="61-client-server-communication">6.1 Client-Server Communication</h3>
+<p>Communication between the React client and FastAPI server is entirely HTTP-based:
+- <strong>Asynchronous Dispatch:</strong> Research queries are submitted via <code>POST /api/runs</code>. The backend validates inputs, assigns a unique <code>run_id</code>, initializes an in-memory <code>asyncio.Queue</code>, launches the workflow in an asynchronous background task, and returns <code>HTTP 202 Accepted</code> with a stream URI.
+- <strong>Server-Sent Events (SSE):</strong> The frontend connects to <code>GET /api/runs/{id}/events</code> via an <code>EventSource</code>. The server pushes structured JSON events indicating stage progression, source discovery, extraction updates, log messages, and completion signals.
+- <strong>Data Hydration:</strong> Upon receiving the completion event, the frontend navigates to <code>/runs/:id</code> and retrieves stored run data, sources, evidence passages, and audit records via parallel <code>GET</code> calls.</p>
+<h3 id="62-backend-nodes-vs-frontend-visual-stages">6.2 Backend Nodes vs. Frontend Visual Stages</h3>
+<p>The backend workflow executes 7 composite graph nodes in <code>agent/nodes.py</code>. To provide granular observability, the frontend visualizes this progress across 8 sequential stages by mapping intermediate sub-actions:
+1. <strong>Scope:</strong> Initial query normalization and constraint parsing.
+2. <strong>Plan:</strong> Subquestion generation and plan-approval display.
+3. <strong>Search:</strong> Search engine and RSS querying.
+4. <strong>Fetch:</strong> Safe HTTP downloading with SSRF validation.
+5. <strong>Extract:</strong> Trafilatura text extraction.
+6. <strong>Rank:</strong> Content deduplication, passage chunking, and BM25 scoring.
+7. <strong>Write:</strong> Report narrative generation (Ollama or extractive).
+8. <strong>Verify:</strong> Citation auditing against SQLite records.</p>
+<hr />
+<h2 id="7-technology-stack">7. Technology Stack</h2>
+<p>The following table details the technologies actively used in the codebase.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Technology</th>
+<th style="text-align: left;">Version / Specification</th>
+<th style="text-align: left;">Exact Function in Codebase</th>
+<th style="text-align: left;">Verification Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Python</strong></td>
+<td style="text-align: left;">3.13.0</td>
+<td style="text-align: left;">Core backend runtime</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>FastAPI</strong></td>
+<td style="text-align: left;">&gt;= 0.115.0</td>
+<td style="text-align: left;">Web framework for REST and SSE endpoints</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Uvicorn</strong></td>
+<td style="text-align: left;">&gt;= 0.30.0</td>
+<td style="text-align: left;">ASGI web server hosting FastAPI</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Pydantic</strong></td>
+<td style="text-align: left;">&gt;= 2.8.0</td>
+<td style="text-align: left;">Strict schema definition and request validation</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Pydantic-Settings</strong></td>
+<td style="text-align: left;">&gt;= 2.4.0</td>
+<td style="text-align: left;">Environment variable management from <code>.env</code></td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>HTTPX</strong></td>
+<td style="text-align: left;">&gt;= 0.27.0</td>
+<td style="text-align: left;">Asynchronous HTTP client for search and scraping</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Trafilatura</strong></td>
+<td style="text-align: left;">&gt;= 2.0.0</td>
+<td style="text-align: left;">Article main-text and metadata extraction</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>LXML</strong></td>
+<td style="text-align: left;">6.1.3</td>
+<td style="text-align: left;">HTML tree parsing and XPath querying for DuckDuckGo</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>SQLite3</strong></td>
+<td style="text-align: left;">Standard Library</td>
+<td style="text-align: left;">Relational persistence for runs, passages, and citations</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Pytest</strong></td>
+<td style="text-align: left;">&gt;= 8.0.0</td>
+<td style="text-align: left;">Backend unit and integration test framework</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>AnyIO</strong></td>
+<td style="text-align: left;">4.15.1</td>
+<td style="text-align: left;">Asynchronous concurrency backend for pytest</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>React</strong></td>
+<td style="text-align: left;">19.3.1</td>
+<td style="text-align: left;">Single-page client framework</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Vite</strong></td>
+<td style="text-align: left;">8.3.5</td>
+<td style="text-align: left;">Frontend build tool and development server</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>TypeScript</strong></td>
+<td style="text-align: left;">7.0.2</td>
+<td style="text-align: left;">Frontend static type safety</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Tailwind CSS</strong></td>
+<td style="text-align: left;">3.4.19</td>
+<td style="text-align: left;">Utility styling based on custom design tokens</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Framer Motion</strong></td>
+<td style="text-align: left;">14.9.1</td>
+<td style="text-align: left;">Declarative animation for UI state transitions</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Radix UI</strong></td>
+<td style="text-align: left;">Primitives</td>
+<td style="text-align: left;">Headless accessible components (Dialog, Tabs, Slider)</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Lucide React</strong></td>
+<td style="text-align: left;">1.68.0</td>
+<td style="text-align: left;">Vector iconography (zero emoji usage)</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Markdown</strong></td>
+<td style="text-align: left;">Python package</td>
+<td style="text-align: left;">Markdown-to-HTML conversion for report exports</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Microsoft Edge</strong></td>
+<td style="text-align: left;">Headless CLI</td>
+<td style="text-align: left;">Headless Chromium engine generating PDF reports</td>
+<td style="text-align: left;">Verified active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>SearXNG</strong></td>
+<td style="text-align: left;">Container image</td>
+<td style="text-align: left;">Metasearch engine defined in <code>docker-compose.yml</code></td>
+<td style="text-align: left;">Configured / Unverified in host</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Ollama</strong></td>
+<td style="text-align: left;">Local daemon</td>
+<td style="text-align: left;">Local LLM inference server (<code>http://localhost:11434</code>)</td>
+<td style="text-align: left;">Implemented with active fallback</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Streamlit</strong></td>
+<td style="text-align: left;">1.66.1</td>
+<td style="text-align: left;">Prototype user interface</td>
+<td style="text-align: left;">Verified active as fallback</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8-implementation-details">8. Implementation Details</h2>
+<h3 id="81-query-submission-and-processing">8.1 Query Submission and Processing</h3>
+<p>Incoming requests are parsed in <code>app/main.py</code>. Payloads are validated against minimum query length constraints ($\ge 3$ characters), maximum source count limits ($1 \le N \le 20$), and allowed modes (<code>web</code>, <code>news</code>, <code>academic</code>).</p>
+<h3 id="82-research-planning">8.2 Research Planning</h3>
+<p>In <code>agent/nodes.py:scope_and_plan_node</code>, the query is algorithmically expanded into four sub-queries:
+1. Direct verbatim query.
+2. Official data query: <code>&lt;query&gt; official data reports</code>.
+3. Timely news query: <code>&lt;query&gt; recent developments news</code>.
+4. Opposing views query: <code>&lt;query&gt; criticism opposing views</code>.</p>
+<h3 id="83-search-and-source-discovery">8.3 Search and Source Discovery</h3>
+<ul>
+<li><strong>DuckDuckGo Client (<code>search/duckduckgo_client.py</code>):</strong> Queries <code>html.duckduckgo.com/html/</code> via HTTP POST with automated fallback to <code>lite.duckduckgo.com/lite/</code>. It extracts target URLs by decoding DuckDuckGo redirect tokens (<code>uddg=</code>), parses snippets, and returns structured <code>SearchResult</code> records.</li>
+<li><strong>SearXNG Client (<code>search/searxng_client.py</code>):</strong> Implements queries against <code>http://localhost:8080/search?format=json</code>. It handles connection errors gracefully and checks endpoint health.</li>
+<li><strong>RSS News Client (<code>search/news_client.py</code>):</strong> Queries public feeds from BBC, The New York Times, and NPR. It performs keyword filtering against <code>&lt;item&gt;</code> titles and descriptions to identify relevant news items.</li>
+</ul>
+<h3 id="84-web-crawling-and-safety-policies">8.4 Web Crawling and Safety Policies</h3>
+<ul>
+<li><strong>SSRF Validation (<code>crawl/policy.py</code>):</strong> Pre-flight checks resolve hostnames to IP addresses using <code>socket.getaddrinfo</code>. IP objects are checked using Python's <code>ipaddress</code> module to block loopback (<code>127.0.0.0/8</code>), private subnets (<code>10.0.0.0/8</code>, <code>172.16.0.0/12</code>, <code>192.168.0.0/16</code>), link-local IPs (<code>169.254.0.0/16</code>), and metadata addresses (<code>169.254.169.254</code>, <code>fd00:ec2::254</code>).</li>
+<li><strong>Manual Redirect Inspection (<code>crawl/fetcher.py</code>):</strong> <code>SafeFetcher</code> disables automated redirect following in HTTPX (<code>follow_redirects=False</code>). Redirect location headers are intercepted and re-validated against the SSRF policy on each hop.</li>
+<li><strong>Size and MIME Boundaries:</strong> Responses are filtered for allowed content types (<code>text/html</code>, <code>application/xhtml+xml</code>, <code>text/plain</code>). Incoming bytes are monitored to terminate downloads exceeding 2 MB.</li>
+</ul>
+<h3 id="85-content-extraction">8.5 Content Extraction</h3>
+<p><code>crawl/extractor.py</code> leverages Trafilatura to extract main text from raw HTML. Boilerplate navigation, advertisements, and scripts are removed. Document metadata (title, author, publication date, language) is captured when present.</p>
+<h3 id="86-content-deduplication">8.6 Content Deduplication</h3>
+<p><code>retrieval/deduplication.py</code> provides three deduplication mechanisms:
+1. <strong>Canonical URL Filtering:</strong> Normalizes URLs (lowercasing hostnames, stripping fragments, and removing tracking parameters).
+2. <strong>Content Hash Matching:</strong> Computes SHA-256 hashes of extracted clean text.
+3. <strong>Shingle Similarity:</strong> Computes 3-word shingles and calculates Jaccard similarity. Documents sharing $\ge 75\%$ similarity with an existing document are clustered and omitted.</p>
+<h3 id="87-passage-chunking">8.7 Passage Chunking</h3>
+<p><code>retrieval/chunking.py</code> splits clean text on paragraph boundaries into chunks targeting 500 characters. Each passage receives a unique ID (<code>&lt;doc_id&gt;-p&lt;index&gt;</code>), records its start and end character offsets relative to the parent document, and stores a SHA-256 content hash.</p>
+<h3 id="88-evidence-ranking-okapi-bm25">8.8 Evidence Ranking (Okapi BM25)</h3>
+<p><code>retrieval/ranking.py</code> indexes passage chunks and calculates Okapi BM25 scores ($k_1=1.5, b=0.75$). Credibility weights are applied to raw scores:
+- Domains ending in <code>.gov</code> or <code>.mil</code>: 1.2x boost.
+- Domains ending in <code>.edu</code> or containing <code>arxiv.org</code>/<code>nih.gov</code>: 1.2x boost.
+- General web domains: 1.0x baseline.</p>
+<h3 id="89-report-synthesis">8.9 Report Synthesis</h3>
+<p><code>report/writer.py:ReportWriter</code> provides two synthesis pathways:
+1. <strong>Ollama Neural Synthesis:</strong> Attempts an HTTP POST to <code>http://localhost:11434/api/generate</code> using the configured model (<code>qwen2.5:7b</code>). Prompts instruct the model to cite specific evidence IDs.
+2. <strong>Deterministic Extractive Synthesis (Active Fallback):</strong> When Ollama is unavailable, the engine compiles the top-ranked passages into thematic sections, formats extracted findings, attaches citation IDs, and records operational warnings.</p>
+<blockquote>
+<p><strong>Epistemic Note:</strong> Extractive fallback ensures that the report reflects only retrieved passage text. However, this does not independently establish objective truth; if retrieved web sources contain inaccurate, biased, or outdated information, the extractive synthesis will reflect those inaccuracies.</p>
+</blockquote>
+<h3 id="810-citation-auditing">8.10 Citation Auditing</h3>
+<p><code>evidence/verifier.py:CitationVerifier</code> inspects all citations in the synthesized report:
+- <strong>Document Existence:</strong> Verifies that the cited <code>document_id</code> exists in SQLite.
+- <strong>Canonical URL Match:</strong> Confirms that the citation URL matches the document's canonical URL.
+- <strong>Passage Existence:</strong> Verifies that all referenced <code>passage_id</code> strings exist in the database.
+- <strong>Token Overlap:</strong> Extracts substantive tokens ($\ge 3$ characters) from the claim and measures their overlap with the cited passage text. Overlap $&lt; 20\%$ is flagged as weak support.</p>
+<h3 id="811-deliverable-export">8.11 Deliverable Export</h3>
+<p><code>report/exporter.py</code> writes six artifacts into <code>reports/&lt;run_id&gt;/</code>:
+- <code>report.md</code>: Markdown document with inline citation links.
+- <code>report.html</code>: Standalone styled HTML document.
+- <code>report.json</code>: Serialized <code>ResearchReport</code> object.
+- <code>sources.json</code>: Array of ingested <code>Document</code> records.
+- <code>evidence.jsonl</code>: Line-delimited JSON containing passage chunks and metadata.
+- <code>run_manifest.json</code>: Metadata summary tracking counts and execution parameters.</p>
+<hr />
+<h2 id="9-research-workflow">9. Research Workflow</h2>
+<p>The end-to-end operational lifecycle follows an eight-stage sequence:</p>
+<pre><code class="language-mermaid">sequenceDiagram
+    autonumber
+    actor User as Researcher
+    participant UI as React Client
+    participant API as FastAPI Ingress
+    participant Graph as Workflow Coordinator
+    participant Crawl as Fetcher &amp; Extractor
+    participant Store as SQLite Database
+    participant Writer as Synthesis &amp; Verifier
+
+    User-&gt;&gt;UI: Enters research question &amp; constraints
+    UI-&gt;&gt;API: POST /api/runs (query, filters)
+    API--&gt;&gt;UI: 202 Accepted (run_id, stream_url)
+    UI-&gt;&gt;API: GET /api/runs/{id}/events (SSE connection)
+
+    API-&gt;&gt;Graph: execute(query, constraints)
+    Graph-&gt;&gt;Store: Initialize run record (status='running')
+    Graph--&gt;&gt;API: Stage: Scope &amp; Plan
+    API--&gt;&gt;UI: SSE: stage('scope'), stage('plan'), plan_ready
+
+    Graph-&gt;&gt;Graph: Search via DuckDuckGo / RSS news
+    Graph-&gt;&gt;Store: Save SearchResults
+    Graph--&gt;&gt;API: Candidate source records
+    API--&gt;&gt;UI: SSE: source(item)
+
+    Graph-&gt;&gt;Crawl: Fetch candidate URLs (SSRF validation)
+    Crawl-&gt;&gt;Crawl: Trafilatura text extraction
+    Graph-&gt;&gt;Store: Save Documents
+    Graph--&gt;&gt;API: Document extraction status
+    API--&gt;&gt;UI: SSE: source_update(status='extracted')
+
+    Graph-&gt;&gt;Graph: Deduplicate, chunk passages &amp; BM25 rank
+    Graph-&gt;&gt;Store: Save Passages &amp; Evidence
+    Graph--&gt;&gt;API: Stage: Rank complete
+    API--&gt;&gt;UI: SSE: stage('rank')
+
+    Graph-&gt;&gt;Writer: Synthesize report (Ollama or Extractive)
+    Writer-&gt;&gt;Writer: Audit citations against stored passages
+    Graph-&gt;&gt;Store: Save Report &amp; Citations
+    Graph-&gt;&gt;Graph: Export deliverables (MD, HTML, JSON)
+    Graph-&gt;&gt;Store: Update run record (status='completed')
+    Graph--&gt;&gt;API: Pipeline complete
+    API--&gt;&gt;UI: SSE: complete(redirect_url)
+
+    UI-&gt;&gt;API: GET /api/runs/{id} + sources + evidence + audit
+    API-&gt;&gt;Store: Query run records
+    API--&gt;&gt;UI: Complete hydrated payload
+    UI-&gt;&gt;User: Displays Report Column, Evidence Drawer, &amp; Audit Table
+</code></pre>
+<hr />
+<h2 id="10-frontend-implementation">10. Frontend Implementation</h2>
+<p>The frontend is implemented in React 19 and styled with Tailwind CSS using a light-mode color palette:
+- Canvas Background: <code>#FFF7EC</code> (cream)
+- Card Surfaces: <code>#FFFFFF</code> (white)
+- Borders &amp; Tints: <code>#FDE0B8</code> (soft cream)
+- Accent &amp; CTA: <code>#FC9A64</code> (warm orange)
+- Badges &amp; Warnings: <code>#C17C75</code> (dusty rose)
+- Muted Labels: <code>#7B515F</code> (mauve)
+- Primary Text: <code>#23131E</code> (dark plum)</p>
+<p>[INSERT FIGURE 1 HERE]</p>
+<p><strong>Figure 1.</strong> Application homepage showing the centered search interface, mode switcher, and backend status indicator.<br />
+<strong>Screenshot instructions:</strong> Capture the initial landing page (<code>http://localhost:5173</code>) showing the search input, "Research Engine" header, and "API Ready" status indicator.</p>
+<hr />
+<p>[INSERT FIGURE 2 HERE]</p>
+<p><strong>Figure 2.</strong> Search mode switcher displaying Web, News, and Academic exploration options.<br />
+<strong>Screenshot instructions:</strong> Capture the pill-shaped mode toggle located directly above the primary search input.</p>
+<hr />
+<p>[INSERT FIGURE 3 HERE]</p>
+<p><strong>Figure 3.</strong> Expanded research filter panel showing search depth, max sources, language, and keyword chip editors.<br />
+<strong>Screenshot instructions:</strong> Click the "Filters" toggle button on the homepage to expand the options panel, capturing date inputs, depth slider, source count stepper, and keyword chips.</p>
+<hr />
+<h3 id="101-live-execution-observability">10.1 Live Execution Observability</h3>
+<p>[INSERT FIGURE 4 HERE]</p>
+<p><strong>Figure 4.</strong> Research plan review card displaying scope and editable query variants before crawling.<br />
+<strong>Screenshot instructions:</strong> Capture <code>/runs/:id/live</code> during execution, showing the "Research Plan" card with editable query variant chips.</p>
+<hr />
+<p>[INSERT FIGURE 5 HERE]</p>
+<p><strong>Figure 5.</strong> Live eight-stage research progress timeline.<br />
+<strong>Screenshot instructions:</strong> Capture the horizontal stage timeline at the top of <code>/runs/:id/live</code> displaying active indicators on current stages and completion marks on finished stages.</p>
+<hr />
+<p>[INSERT FIGURE 6 HERE]</p>
+<p><strong>Figure 6.</strong> Streaming source discovery feed displaying incoming candidate cards during crawling.<br />
+<strong>Screenshot instructions:</strong> Capture the live run view as candidate sources appear, showing source titles, domain labels, and extraction indicators.</p>
+<hr />
+<h3 id="102-results-and-evidence-exploration">10.2 Results and Evidence Exploration</h3>
+<p>[INSERT FIGURE 7 HERE]</p>
+<p><strong>Figure 7.</strong> Final research report view displaying the executive summary, confidence badge, thematic findings, and reference list.<br />
+<strong>Screenshot instructions:</strong> Capture the top of <code>/runs/:id</code> on the "Report" tab, displaying the query title, stats strip, confidence badge, and structured findings.</p>
+<hr />
+<p>[INSERT FIGURE 8 HERE]</p>
+<p><strong>Figure 8.</strong> Interactive slide-in evidence drawer displaying the exact supporting text passage.<br />
+<strong>Screenshot instructions:</strong> Click an inline citation badge (e.g., <code>[1]</code>) within the report text to open the evidence drawer on the right side of the screen, showing highlighted passage text and metadata.</p>
+<hr />
+<p>[INSERT FIGURE 9 HERE]</p>
+<p><strong>Figure 9.</strong> Evidence browser tab displaying all ranked passages with BM25 scores and entity highlights.<br />
+<strong>Screenshot instructions:</strong> Switch to the "Evidence" tab on the results page to show the list of ranked passages with rank numbers and BM25 scores.</p>
+<hr />
+<p>[INSERT FIGURE 10 HERE]</p>
+<p><strong>Figure 10.</strong> Citation audit table displaying verification verdicts, claim statements, and support spans.<br />
+<strong>Screenshot instructions:</strong> Switch to the "Audit" tab on the results page, capturing the summary metrics (Verified, Partial, Disputed, Missing) and the detailed audit table.</p>
+<hr />
+<p>[INSERT FIGURE 11 HERE]</p>
+<p><strong>Figure 11.</strong> Sources and provenance tab displaying candidate cards and academic metadata.<br />
+<strong>Screenshot instructions:</strong> Switch to the "Sources" tab on the results page, showing source facet pills (<code>All</code>, <code>Web</code>, <code>News</code>, <code>Academic</code>) and candidate source cards.</p>
+<hr />
+<p>[INSERT FIGURE 12 HERE]</p>
+<p><strong>Figure 12.</strong> Multi-format export panel.<br />
+<strong>Screenshot instructions:</strong> Switch to the "Export" tab on the results page, showing one-click download buttons for Markdown, HTML, and JSON deliverables.</p>
+<hr />
+<p>[INSERT FIGURE 13 HERE]</p>
+<p><strong>Figure 13.</strong> Past research runs slide-over drawer.<br />
+<strong>Screenshot instructions:</strong> Click the "Past runs" history button in the top navigation header on the homepage to open the right-side slide-over drawer displaying past run records.</p>
+<hr />
+<h2 id="11-backend-and-api-design">11. Backend and API Design</h2>
+<p>The backend is built with FastAPI (<code>app/main.py</code>). All routes enforce input validation and structured error responses.</p>
+<p>[INSERT FIGURE 14 HERE]</p>
+<p><strong>Figure 14.</strong> FastAPI interactive OpenAPI documentation (Swagger UI).<br />
+<strong>Screenshot instructions:</strong> Capture <code>http://localhost:8000/docs</code> in a browser, showing all documented endpoints under the "General", "Health", "Configuration", "Research", and "Runs" tags.</p>
+<hr />
+<h3 id="verified-endpoint-reference-table">Verified Endpoint Reference Table</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">HTTP Method</th>
+<th style="text-align: left;">Route</th>
+<th style="text-align: left;">Implementation Function</th>
+<th style="text-align: left;">Purpose</th>
+<th style="text-align: left;">Request Payload</th>
+<th style="text-align: left;">Response Status &amp; Shape</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/</code></td>
+<td style="text-align: left;"><code>root()</code></td>
+<td style="text-align: left;">Service root</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: <code>{"name", "status", "version", "message"}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/health</code></td>
+<td style="text-align: left;"><code>health()</code></td>
+<td style="text-align: left;">Liveness probe</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: <code>{"status": "ok"}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/config</code></td>
+<td style="text-align: left;"><code>get_config()</code></td>
+<td style="text-align: left;">Public configuration parameters</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: <code>{"app_name", "max_sources", "search_provider", ...}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>POST</code></td>
+<td style="text-align: left;"><code>/api/research</code></td>
+<td style="text-align: left;"><code>create_research()</code></td>
+<td style="text-align: left;">Synchronous pipeline execution</td>
+<td style="text-align: left;"><code>ResearchRequest</code></td>
+<td style="text-align: left;"><code>200 OK</code>: <code>ResearchResponse</code> (Report, Sources, Evidence, Audits)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/research/{id}</code></td>
+<td style="text-align: left;"><code>get_research_run()</code></td>
+<td style="text-align: left;">Retrieve saved run</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: Run record, report, warnings, and download links</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/research/{id}/sources</code></td>
+<td style="text-align: left;"><code>get_research_sources()</code></td>
+<td style="text-align: left;">Retrieve ingested web sources</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: <code>{"research_id", "count", "sources": [...]}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/research/{id}/evidence</code></td>
+<td style="text-align: left;"><code>get_research_evidence()</code></td>
+<td style="text-align: left;">Retrieve ranked evidence passages</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: <code>{"research_id", "evidence", "passages"}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/research/{id}/export/{format}</code></td>
+<td style="text-align: left;"><code>download_research_export()</code></td>
+<td style="text-align: left;">Download export deliverable</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: File stream (<code>report.md</code>, <code>report.html</code>, <code>report.json</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>POST</code></td>
+<td style="text-align: left;"><code>/api/runs</code></td>
+<td style="text-align: left;"><code>create_run_endpoint()</code></td>
+<td style="text-align: left;">Asynchronous pipeline execution</td>
+<td style="text-align: left;"><code>CreateRunPayload</code></td>
+<td style="text-align: left;"><code>202 Accepted</code>: <code>{"run_id", "status": "pending", "stream_url"}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/runs/{id}/events</code></td>
+<td style="text-align: left;"><code>stream_run_events()</code></td>
+<td style="text-align: left;">Real-time SSE telemetry</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: <code>text/event-stream</code> emitting stage events</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/runs</code></td>
+<td style="text-align: left;"><code>list_runs_endpoint()</code></td>
+<td style="text-align: left;">List past research runs</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: Array of <code>RunSummary</code> items with stats</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/runs/{id}</code></td>
+<td style="text-align: left;"><code>get_run_detail()</code></td>
+<td style="text-align: left;">Retrieve complete UI-formatted run</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: Full <code>Run</code> entity with report and stats</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/runs/{id}/sources</code></td>
+<td style="text-align: left;"><code>get_run_sources_endpoint()</code></td>
+<td style="text-align: left;">Retrieve UI-formatted sources</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: <code>{"run_id", "sources": [...]}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/runs/{id}/evidence</code></td>
+<td style="text-align: left;"><code>get_run_evidence_endpoint()</code></td>
+<td style="text-align: left;">Retrieve UI-formatted passages</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: <code>{"run_id", "passages": [...]}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/runs/{id}/audit</code></td>
+<td style="text-align: left;"><code>get_run_audit_endpoint()</code></td>
+<td style="text-align: left;">Retrieve verification audit data</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: <code>{"run_id", "summary": {...}, "results": [...]}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>GET</code></td>
+<td style="text-align: left;"><code>/api/runs/{id}/export/{format}</code></td>
+<td style="text-align: left;"><code>export_run_endpoint()</code></td>
+<td style="text-align: left;">UI deliverable export route</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>200 OK</code>: File stream delegated to export engine</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-database-design">12. Database Design</h2>
+<p>The relational schema is defined in <code>storage/database.py</code> and executed on SQLite (<code>research.db</code>).</p>
+<pre><code class="language-mermaid">erDiagram
+    RESEARCH_RUNS ||--o{ SEARCH_RESULTS : contains
+    RESEARCH_RUNS ||--o{ DOCUMENTS : gathers
+    RESEARCH_RUNS ||--o{ PASSAGES : yields
+    RESEARCH_RUNS ||--o{ EVIDENCE : scores
+    RESEARCH_RUNS ||--o{ CITATIONS : validates
+    DOCUMENTS ||--o{ PASSAGES : segments
+
+    RESEARCH_RUNS {
+        TEXT run_id PK
+        TEXT query
+        TEXT constraints_json
+        TEXT start_time
+        TEXT end_time
+        TEXT budgets_json
+        TEXT model_version
+        TEXT status
+        TEXT summary
+        TEXT report_json
+        TEXT warnings_json
+    }
+
+    SEARCH_RESULTS {
+        INTEGER id PK
+        TEXT run_id FK
+        TEXT query_id
+        INTEGER rank
+        TEXT engine
+        TEXT title
+        TEXT snippet
+        TEXT url
+        TEXT discovered_at
+    }
+
+    DOCUMENTS {
+        TEXT document_id PK
+        TEXT run_id FK
+        TEXT canonical_url
+        TEXT domain
+        TEXT title
+        TEXT author
+        TEXT published_at
+        TEXT retrieved_at
+        TEXT language
+        TEXT content_hash
+        TEXT fetch_status
+        TEXT raw_text
+    }
+
+    PASSAGES {
+        TEXT passage_id PK
+        TEXT document_id FK
+        TEXT run_id FK
+        TEXT text
+        TEXT heading
+        INTEGER start_char
+        INTEGER end_char
+        TEXT passage_hash
+    }
+
+    EVIDENCE {
+        TEXT evidence_id PK
+        TEXT run_id FK
+        TEXT claim
+        TEXT passage_ids_json
+        REAL relevance_score
+        TEXT source_domain
+        TEXT source_signals_json
+        TEXT corroboration_group
+        TEXT notes
+    }
+
+    CITATIONS {
+        TEXT citation_id PK
+        TEXT run_id FK
+        TEXT document_id FK
+        TEXT passage_ids_json
+        TEXT url
+        TEXT access_date
+        TEXT display_metadata_json
+    }
+</code></pre>
+<hr />
+<h2 id="13-evidence-and-citation-verification">13. Evidence and Citation Verification</h2>
+<p>The citation audit engine in <code>evidence/verifier.py</code> provides verification against database records.</p>
+<h3 id="131-verification-taxonomy-limitations">13.1 Verification Taxonomy &amp; Limitations</h3>
+<p>The verifier evaluates citations across four criteria:
+1. <strong>Document Record Check:</strong> Confirms that the referenced <code>document_id</code> exists in the <code>documents</code> table.
+2. <strong>Canonical URL Match:</strong> Confirms that the citation URL matches the canonical URL stored during crawling.
+3. <strong>Passage Record Check:</strong> Confirms that referenced <code>passage_id</code> values exist in the <code>passages</code> table.
+4. <strong>Lexical Token Overlap:</strong> Evaluates token intersection between the claim statement and the cited passage:
+$$\text{Overlap Ratio} = \frac{|\text{Tokens}(\text{Claim}) \cap \text{Tokens}(\text{Passage})|}{|\text{Tokens}(\text{Claim})|}$$
+If the overlap is $\ge 20\%$, the claim is marked <code>substantiated=True</code>.</p>
+<h3 id="132-technical-boundaries-of-verification">13.2 Technical Boundaries of Verification</h3>
+<ul>
+<li><strong>Structural Integrity:</strong> The verification process prevents the hallucination of nonexistent URLs, mismatched domains, or fabricated passage IDs.</li>
+<li><strong>Semantic Limits:</strong> The token-overlap metric is a surface-level lexical heuristic. It does not perform natural language inference (NLI) to assess logical entailment, presupposition, or negation. A claim stating <em>"Algorithm X failed benchmark Y"</em> citing a passage stating <em>"Algorithm X passed benchmark Y"</em> would exhibit high lexical token overlap despite semantic contradiction. True semantic verification remains future work.</li>
+</ul>
+<hr />
+<h2 id="14-testing-and-evaluation">14. Testing and Evaluation</h2>
+<h3 id="141-automated-backend-test-execution">14.1 Automated Backend Test Execution</h3>
+<p>Automated backend tests were executed via <code>pytest-anyio</code>. All tests run offline using mocks and fixtures without contacting live web hosts.</p>
+<p><strong>Execution Command:</strong></p>
+<pre><code class="language-powershell">.\.venv\Scripts\python.exe -m pytest -v
+</code></pre>
+<p><strong>Verified Test Summary (27 passed in 23.48s):</strong>
+- <code>test_api.py</code> (11 tests): Endpoint validation, health checks, public configuration, error responses, run lifecycle, and <code>/api/runs</code> REST contract.
+- <code>test_evidence.py</code> (5 tests): Paragraph chunking, character offsets, deduplication (exact hash and 3-gram Jaccard), valid citation verification, invalid citation rejection, and weak claim support detection.
+- <code>test_extractor.py</code> (2 tests): Trafilatura article extraction against local HTML fixtures and handling of empty documents.
+- <code>test_repository.py</code> (4 tests): SQLite run state management, document persistence, passage querying, and report serialization.
+- <code>test_search.py</code> (5 tests): DuckDuckGo HTML parsing, Lite endpoint fallback, redirect unquoting, empty query handling, and timeout handling.</p>
+<h3 id="142-frontend-production-compilation">14.2 Frontend Production Compilation</h3>
+<p>The React frontend was compiled using Vite and the TypeScript compiler.</p>
+<p><strong>Execution Command:</strong></p>
+<pre><code class="language-powershell">cd frontend; npm run build
+</code></pre>
+<p><strong>Verified Build Metrics:</strong>
+- <strong>Status:</strong> Compiled successfully with 0 errors (<code>vite v8.3.5</code>).
+- <strong>Build Duration:</strong> 4.67 seconds.
+- <strong>Module Count:</strong> 2,523 modules transformed.
+- <strong>Output Artifacts:</strong> <code>index.html</code> (0.85 kB), CSS bundle (20.76 kB / 5.18 kB gzip), JS bundle (495.04 kB / 155.07 kB gzip).</p>
+<h3 id="143-manual-verification-matrix-for-live-components">14.3 Manual Verification Matrix for Live Components</h3>
+<p>Because the automated test suite isolates the application using mocks, a manual verification assessment was conducted to evaluate live integrations:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Component</th>
+<th style="text-align: left;">Test Mode</th>
+<th style="text-align: left;">Operational Status</th>
+<th style="text-align: left;">Observations &amp; Limitations</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Live DuckDuckGo Search</strong></td>
+<td style="text-align: left;">Live Network</td>
+<td style="text-align: left;"><strong>Operational</strong></td>
+<td style="text-align: left;">Successfully retrieves and parses search results from <code>html.duckduckgo.com</code> and <code>lite.duckduckgo.com</code>. Subject to potential rate limits on high request volumes.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Live RSS News Ingestion</strong></td>
+<td style="text-align: left;">Live Network</td>
+<td style="text-align: left;"><strong>Operational</strong></td>
+<td style="text-align: left;">Ingests feeds from BBC, NYT, and NPR. Restricted to stories currently listed in the static feed XML.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Live HTTP Crawling</strong></td>
+<td style="text-align: left;">Live Network</td>
+<td style="text-align: left;"><strong>Operational</strong></td>
+<td style="text-align: left;">Safely fetches public pages; skips PDF/binary links and blocks private IP targets. Fails on JavaScript-rendered single-page applications.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Live SSE Telemetry</strong></td>
+<td style="text-align: left;">Local Browser</td>
+<td style="text-align: left;"><strong>Operational</strong></td>
+<td style="text-align: left;">Streams pipeline transitions, plan notifications, and source arrivals to the React client in real time.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Report Deliverable Exports</strong></td>
+<td style="text-align: left;">Local Filesystem</td>
+<td style="text-align: left;"><strong>Operational</strong></td>
+<td style="text-align: left;">Generates Markdown, sanitized HTML, JSON, JSONL, and manifest files in <code>reports/&lt;run_id&gt;/</code>.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Local Ollama LLM</strong></td>
+<td style="text-align: left;">Local Daemon</td>
+<td style="text-align: left;"><strong>Fallback Active</strong></td>
+<td style="text-align: left;">Falls back to deterministic extractive synthesis when Ollama is offline or uninstalled.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>SearXNG Docker Container</strong></td>
+<td style="text-align: left;">Container Service</td>
+<td style="text-align: left;"><strong>Configured / Inactive</strong></td>
+<td style="text-align: left;">Service definition exists in <code>docker-compose.yml</code>, but could not be launched due to host Windows WSL2 / Docker daemon errors.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Evaluation Metric Qualification:</strong> Passing automated tests confirms code correctness, API contracts, and exception safety; it does not constitute an empirical proof of real-world factual accuracy. In addition, the assignment's target of $\ge 90\%$ citation support cannot be definitively asserted across arbitrary real-world queries without a comprehensive manual benchmark evaluation across diverse test sets.</p>
+</blockquote>
+<hr />
+<h2 id="15-demonstration-and-sample-research">15. Demonstration and Sample Research</h2>
+<h3 id="151-investigation-of-test-artifacts-exampleorg-examplegov">15.1 Investigation of Test Artifacts (<code>example.org</code> / <code>example.gov</code>)</h3>
+<p>An audit of historical artifacts in the repository identified runs such as <code>run-fc11e2c0</code> and <code>run-d1e85247</code> containing sources from <code>https://example.org/disaster-ai</code> and <code>https://example.gov/early-warning</code>. Investigation revealed that these runs were generated by automated tests in <code>tests/test_api.py:test_create_research_success_and_retrieval</code>, which mocked DuckDuckGo search to return synthetic URLs and HTML fixtures. They represent automated unit test validation rather than live web research.</p>
+<h3 id="152-authentic-live-research-run-run-2575238e">15.2 Authentic Live Research Run (<code>run-2575238e</code>)</h3>
+<p>To evaluate live open-web research performance, the repository was audited for authentic runs executed against live web endpoints. The record for <strong><code>run-2575238e</code></strong> documents a genuine end-to-end execution:</p>
+<ul>
+<li><strong>Research Query:</strong> <em>"State of open-source multimodal models in 2024"</em></li>
+<li><strong>Execution Timestamps:</strong> 2026-11-06T12:59:44 to 2026-11-06T13:00:08 (24.05s elapsed).</li>
+<li><strong>Search Provider:</strong> DuckDuckGo live web scraper.</li>
+<li><strong>Live Search Results Returned:</strong></li>
+<li><code>https://thenewstack.io/5-multimodal-ai-models-that-are-actually-open-source/</code></li>
+<li><code>https://arxiv.org/pdf/2409.17146v1</code></li>
+<li><code>https://arxiv.org/html/2412.05271v2</code></li>
+<li><code>https://github.com/OpenEnvision/Awesome-Multimodal-Modeling</code></li>
+<li><code>https://www.turingpost.com/p/10-open-mllms</code></li>
+<li><strong>Real-World Crawl Filtering &amp; Error Handling:</strong></li>
+<li><code>arxiv.org/pdf/2409.17146v1</code>: Correctly rejected by content-type filter (<code>Unsupported content type: application/pdf</code>).</li>
+<li><code>turingpost.com/p/10-open-mllms</code>: Encountered HTTP 403 Forbidden and was logged as a non-fatal warning without terminating the mission.</li>
+<li>Three sources were successfully crawled and parsed: <code>thenewstack.io</code>, <code>arxiv.org/html/2412.05271v2</code>, and <code>github.com/OpenEnvision/Awesome-Multimodal-Modeling</code>.</li>
+<li><strong>Passages &amp; Citations Generated:</strong> 3 citation-stable passages chunked and indexed; 3 structured citations generated (<code>cit-1</code>, <code>cit-2</code>, <code>cit-3</code>).</li>
+<li><strong>Citation Verification Audit:</strong></li>
+<li>All 3 citations passed structural verification against stored document IDs and canonical URLs.</li>
+<li>All 3 passages were resolved in SQLite.</li>
+<li><strong>Deliverables Exported:</strong> All six artifacts (<code>report.md</code>, <code>report.html</code>, <code>report.json</code>, <code>sources.json</code>, <code>evidence.jsonl</code>, <code>run_manifest.json</code>) were generated in <code>reports/run-2575238e/</code>.</li>
+</ul>
+<hr />
+<h2 id="16-comparison-against-original-assignment-requirements">16. Comparison Against Original Assignment Requirements</h2>
+<p>This compliance matrix provides an objective audit of the implementation against the specifications in the 24 August 2026 project proposal.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Proposal Requirement</th>
+<th style="text-align: left;">Specification</th>
+<th style="text-align: left;">Implementation Status</th>
+<th style="text-align: left;">Actual Implementation Details</th>
+<th style="text-align: left;">Evidence in Codebase</th>
+<th style="text-align: left;">Remaining Limitations</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Natural Language Input</strong></td>
+<td style="text-align: left;">Free-form research queries</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Validated via FastAPI schemas ($\ge 3$ chars); React search bar with filter controls</td>
+<td style="text-align: left;"><code>app/main.py:86</code>, <code>frontend/src/pages/HomePage.tsx:43</code></td>
+<td style="text-align: left;">None</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Query Planning</strong></td>
+<td style="text-align: left;">Generate 3–8 diverse search queries</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Algorithmic expansion into direct, official, news, and opposing sub-queries</td>
+<td style="text-align: left;"><code>agent/nodes.py:24-36</code></td>
+<td style="text-align: left;">Uses deterministic templates rather than dynamic LLM planning</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>SearXNG Discovery</strong></td>
+<td style="text-align: left;">Query self-hosted SearXNG JSON API</td>
+<td style="text-align: left;"><strong>Partially implemented</strong></td>
+<td style="text-align: left;">HTTPX client querying <code>/search?format=json</code> with health checks; retained as optional setting</td>
+<td style="text-align: left;"><code>search/searxng_client.py</code></td>
+<td style="text-align: left;">Configured but not operational in evaluation environment due to host Docker daemon failure</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>DuckDuckGo Discovery</strong></td>
+<td style="text-align: left;">Free search without API keys/Docker</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Native scraper for HTML and Lite endpoints with redirect token unquoting</td>
+<td style="text-align: left;"><code>search/duckduckgo_client.py</code></td>
+<td style="text-align: left;">Potential vulnerability to IP rate-limiting during high-frequency scraping</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>News Discovery</strong></td>
+<td style="text-align: left;">Query RSS/Atom feeds for news</td>
+<td style="text-align: left;"><strong>Partially implemented</strong></td>
+<td style="text-align: left;">XML parser querying BBC, NYT, and NPR feeds with query keyword filtering</td>
+<td style="text-align: left;"><code>search/news_client.py</code></td>
+<td style="text-align: left;">Limited to active items in 3 static RSS feeds; GDELT/Common Crawl News not integrated</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Crawling &amp; Safety</strong></td>
+<td style="text-align: left;">Polite crawling, size &amp; timeout caps</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;"><code>SafeFetcher</code> enforcing 15s timeouts, 2 MB size limits, and text content-type checks</td>
+<td style="text-align: left;"><code>crawl/fetcher.py</code></td>
+<td style="text-align: left;">JavaScript-heavy single-page applications are not rendered</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>robots.txt Compliance</strong></td>
+<td style="text-align: left;">Check robots.txt permissions</td>
+<td style="text-align: left;"><strong>Partially implemented</strong></td>
+<td style="text-align: left;">Descriptive User-Agent configured; robots policy documented</td>
+<td style="text-align: left;"><code>crawl/policy.py</code>, <code>crawl/fetcher.py</code></td>
+<td style="text-align: left;">Automated pre-fetch <code>robots.txt</code> parsing is not implemented in the crawler loop</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>SSRF Defense</strong></td>
+<td style="text-align: left;">Block private IPs &amp; cloud metadata</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Pre-flight DNS resolution checking private IPs, loopback, and metadata (<code>169.254.169.254</code>) on all hops</td>
+<td style="text-align: left;"><code>crawl/policy.py:90-178</code></td>
+<td style="text-align: left;">DNS rebinding during connection window is not fully mitigated at socket level</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Deduplication</strong></td>
+<td style="text-align: left;">URL, content hash &amp; near-duplicate</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Canonical URL normalization, SHA-256 hash sets, and 3-gram Jaccard shingling ($\ge 75\%$)</td>
+<td style="text-align: left;"><code>retrieval/deduplication.py</code></td>
+<td style="text-align: left;">Shingling is memory-resident and not scaled across distributed runs</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Lexical Ranking</strong></td>
+<td style="text-align: left;">BM25 ranking over passage chunks</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Pure-Python Okapi BM25 implementation ($k_1=1.5, b=0.75$)</td>
+<td style="text-align: left;"><code>retrieval/ranking.py:14-98</code></td>
+<td style="text-align: left;">Semantic vector ranking and cross-encoders are not active</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Source Credibility</strong></td>
+<td style="text-align: left;">Explainable credibility signals</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">1.2x boost for <code>.gov</code>, <code>.mil</code>, and <code>.edu</code> domains; tracks authorship and publication dates</td>
+<td style="text-align: left;"><code>retrieval/ranking.py:100-126</code></td>
+<td style="text-align: left;">PageRank and domain authority metrics are not modeled</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Evidence Storage</strong></td>
+<td style="text-align: left;">Structured SQLite storage</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Relational schema storing runs, search results, documents, passages, evidence, and citations</td>
+<td style="text-align: left;"><code>storage/database.py</code>, <code>storage/repository.py</code></td>
+<td style="text-align: left;">SQLite is single-node; not intended for horizontal scaling</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Claim-Level Citations</strong></td>
+<td style="text-align: left;">Claims linked to passage IDs</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;"><code>Citation</code> model links claim sentences to specific passage offsets</td>
+<td style="text-align: left;"><code>evidence/schemas.py:117-129</code></td>
+<td style="text-align: left;">Footnotes operate at sentence/passage chunk level</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Citation Verification</strong></td>
+<td style="text-align: left;">Check URLs, document IDs &amp; passages</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;"><code>CitationVerifier</code> audits store presence, URL match, passage resolution, and lexical overlap</td>
+<td style="text-align: left;"><code>evidence/verifier.py</code></td>
+<td style="text-align: left;">Token overlap heuristic does not verify semantic entailment</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Conflict &amp; Uncertainty</strong></td>
+<td style="text-align: left;">Surface disagreements &amp; limits</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Disagreements and scope limits compiled into dedicated report sections</td>
+<td style="text-align: left;"><code>report/writer.py:180-210</code></td>
+<td style="text-align: left;">Disagreements identified via heuristics</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Local LLM Inference</strong></td>
+<td style="text-align: left;">Ollama serving open-weight models</td>
+<td style="text-align: left;"><strong>Partially implemented</strong></td>
+<td style="text-align: left;">HTTP client querying Ollama at <code>localhost:11434</code>; verified with automatic extractive fallback</td>
+<td style="text-align: left;"><code>report/writer.py:85-151</code></td>
+<td style="text-align: left;">Ollama daemon was not running on host environment during evaluation</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Extractive Fallback</strong></td>
+<td style="text-align: left;">Deterministic evidence report writer</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Assembles structured thematic findings directly from verified passages</td>
+<td style="text-align: left;"><code>report/writer.py:153-241</code></td>
+<td style="text-align: left;">Narrative fluidity is lower than neural generation</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Research History</strong></td>
+<td style="text-align: left;">Inspect past research runs</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;"><code>list_runs</code> endpoint in repository and slide-over history drawer in UI</td>
+<td style="text-align: left;"><code>storage/repository.py:69-90</code>, <code>frontend/src/components/home/PastRunsSlideOver.tsx</code></td>
+<td style="text-align: left;">None</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>React Web Interface</strong></td>
+<td style="text-align: left;">Full-page web application</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">React 19 single-page app with Tailwind CSS, custom design tokens, and Framer Motion</td>
+<td style="text-align: left;"><code>frontend/src/</code></td>
+<td style="text-align: left;">None</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Live Telemetry (SSE)</strong></td>
+<td style="text-align: left;">Streaming progress observability</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Server-Sent Events stream emitting stage transitions, sources, and log entries</td>
+<td style="text-align: left;"><code>app/main.py:382-416</code>, <code>frontend/src/hooks/useRunEvents.ts</code></td>
+<td style="text-align: left;">None</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Multi-Format Export</strong></td>
+<td style="text-align: left;">Markdown, HTML, JSON, JSONL</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;"><code>ReportExporter</code> generating clean Markdown, HTML, JSON, JSONL, and manifest files</td>
+<td style="text-align: left;"><code>report/exporter.py</code></td>
+<td style="text-align: left;">PDF export generated via headless browser conversion script</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Docker Deployment</strong></td>
+<td style="text-align: left;">Docker Compose for services</td>
+<td style="text-align: left;"><strong>Partially implemented</strong></td>
+<td style="text-align: left;"><code>docker-compose.yml</code> and <code>docker/searxng/settings.yml</code> present in repository</td>
+<td style="text-align: left;"><code>docker-compose.yml</code></td>
+<td style="text-align: left;">Deployment could not be executed due to host Windows WSL2 / Docker failure</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Automated Testing</strong></td>
+<td style="text-align: left;">Offline test suite</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">27 passing tests covering API, crawler, extraction, BM25, and repository</td>
+<td style="text-align: left;"><code>tests/</code></td>
+<td style="text-align: left;">Live site integration tests omitted by design to ensure repeatability</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Documentation</strong></td>
+<td style="text-align: left;">Architecture and decisions recorded</td>
+<td style="text-align: left;"><strong>Fully implemented</strong></td>
+<td style="text-align: left;">Architecture guide, design decisions, and comprehensive final report</td>
+<td style="text-align: left;"><code>docs/</code></td>
+<td style="text-align: left;">None</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="17-limitations-and-technical-analysis">17. Limitations and Technical Analysis</h2>
+<h3 id="171-docker-desktop-wsl2-environment-obstacle">17.1 Docker Desktop / WSL2 Environment Obstacle</h3>
+<p>The original design relied on SearXNG running inside Docker Compose. During setup on the Windows host machine, the Windows Subsystem for Linux (WSL2) service failed to launch the Docker daemon. To prevent project blockage, the search interface was decoupled from Docker by developing <code>search/duckduckgo_client.py</code> as a primary search provider. The SearXNG client and Docker configuration were retained in the repository, but remained unverified in the evaluation environment.</p>
+<h3 id="172-local-llm-availability-and-extractive-fallback">17.2 Local LLM Availability and Extractive Fallback</h3>
+<p><code>report/writer.py</code> is configured to connect to Ollama (<code>qwen2.5:7b</code>). Because the evaluation workstation lacked GPU acceleration and did not have the Ollama service running, all live executions engaged the deterministic extractive fallback. This design decision ensured system availability, but means that narrative synthesis relies on passage extraction rather than natural language generation.</p>
+<h3 id="173-web-scraping-and-dynamic-rendering">17.3 Web Scraping and Dynamic Rendering</h3>
+<p>The engine relies on static HTTP fetching via HTTPX and text extraction via Trafilatura. Web pages that require client-side JavaScript execution (such as React or Vue applications that serve empty root containers) yield minimal extracted text. Furthermore, the crawler does not parse <code>robots.txt</code> dynamically before fetching, representing a gap relative to web standards.</p>
+<h3 id="174-lexical-vs-semantic-citation-verification">17.4 Lexical vs. Semantic Citation Verification</h3>
+<p>The current verifier measures lexical token overlap between claims and passages. While this successfully detects fabricated citations, missing documents, and corrupted URLs, it does not evaluate semantic entailment. Implementing natural language inference (NLI) cross-encoders represents a clear target for future enhancement.</p>
+<hr />
+<h2 id="18-future-improvements">18. Future Improvements</h2>
+<ol>
+<li><strong>Natural Language Inference (NLI) Verifier:</strong> Integrate a compact cross-encoder model (e.g., <code>cross-encoder/nli-deberta-v3-small</code>) to classify claim-passage relationships into entailment, contradiction, or neutral states.</li>
+<li><strong>Dense Semantic &amp; Hybrid Retrieval:</strong> Incorporate local sentence-transformers (e.g., <code>all-MiniLM-L6-v2</code>) via FAISS or SQLite-VSS, fusing dense vector similarity with lexical BM25 scores through Reciprocal Rank Fusion (RRF).</li>
+<li><strong>Automated robots.txt Compliance:</strong> Implement an asynchronous <code>urllib.robotparser</code> caching module to check domain crawling rules before dispatching fetch requests.</li>
+<li><strong>Scholarly API Integration:</strong> Expand Academic mode by integrating direct connectors to open scholarly APIs (such as CrossRef, Semantic Scholar, or arXiv API) rather than relying on general web search with domain filters.</li>
+<li><strong>Headless Browser Rendering Fallback:</strong> Integrate an optional, lightweight Playwright worker triggered when static extraction yields insufficient content.</li>
+</ol>
+<hr />
+<h2 id="19-conclusion">19. Conclusion</h2>
+<p>The <strong>Agentic Open-Source Web Research Engine</strong> has been implemented as a working Minimum Viable Product (MVP) that automates the research lifecycle from query decomposition to citation-audited report delivery. By operating without commercial search APIs, proprietary vector stores, or closed-source LLMs, the system demonstrates the feasibility of transparent, locally deployable information gathering.</p>
+<p>Key engineering milestones achieved include a zero-credential DuckDuckGo discovery scraper, multi-hop SSRF protection, pure-Python Okapi BM25 ranking, structured SQLite persistence, and an interactive React 19 interface with real-time SSE observability. While host environment constraints necessitated substituting SearXNG with DuckDuckGo and relying on extractive synthesis in place of local Ollama neural generation, the resulting architecture remains modular, inspectable, and verified by 27 passing automated tests. Future work will focus on integrating dense semantic vector retrieval, formal robots.txt parsing, and NLI-based citation verification.</p>
+<hr />
+<h2 id="20-references">20. References</h2>
+<ol>
+<li><strong>Trafilatura:</strong> Barbaresi, A. (2021). <em>Trafilatura: A Web Scraping Library and Command-Line Tool for Text Discovery and Extraction.</em> In Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics (System Demonstrations), pages 122–131. <a href="https://github.com/adbar/trafilatura">https://github.com/adbar/trafilatura</a></li>
+<li><strong>FastAPI Framework:</strong> Ramírez, S. (2018). <em>FastAPI: Modern, High-Performance Web Framework for Python.</em> <a href="https://fastapi.tiangolo.com/">https://fastapi.tiangolo.com/</a></li>
+<li><strong>Okapi BM25 Formulation:</strong> Robertson, S. E., &amp; Zaragoza, H. (2009). <em>The Probabilistic Relevance Framework: BM25 and Beyond.</em> Foundations and Trends in Information Retrieval, 3(4), 333–389.</li>
+<li><strong>DuckDuckGo Open Search Interface:</strong> DuckDuckGo Community. <em>DuckDuckGo HTML/Lite Search Endpoints.</em> <a href="https://html.duckduckgo.com/html/">https://html.duckduckgo.com/html/</a></li>
+<li><strong>SearXNG Documentation:</strong> SearXNG Development Team. <em>SearXNG: A Free Internet Metasearch Engine.</em> <a href="https://docs.searxng.org/">https://docs.searxng.org/</a></li>
+<li><strong>HTTPX Client:</strong> Encode Team. <em>HTTPX: A Next-Generation HTTP Client for Python.</em> <a href="https://www.python-httpx.org/">https://www.python-httpx.org/</a></li>
+<li><strong>React 19 Documentation:</strong> Meta Open Source. <em>React: A JavaScript Library for Building User Interfaces.</em> <a href="https://react.dev/">https://react.dev/</a></li>
+<li><strong>Vite Build Tool:</strong> You, E., &amp; Vite Contributors. <em>Vite: Next Generation Frontend Tooling.</em> <a href="https://vite.dev/">https://vite.dev/</a></li>
+<li><strong>Tailwind CSS:</strong> Wathan, A., &amp; Tailwind Labs. <em>Tailwind CSS: A Utility-First CSS Framework.</em> <a href="https://tailwindcss.com/">https://tailwindcss.com/</a></li>
+<li><strong>Framer Motion:</strong> Motion Division. <em>Framer Motion: Production-Ready Animation Library for React.</em> <a href="https://www.framer.com/motion/">https://www.framer.com/motion/</a></li>
+</ol>
+<hr />
+<h2 id="21-appendices">21. Appendices</h2>
+<h3 id="appendix-a-complete-project-directory-structure">Appendix A: Complete Project Directory Structure</h3>
+<pre><code class="language-text">agentic-web-research-engine/
+├── app/
+│   ├── __init__.py
+│   ├── config.py              # Pydantic-settings configuration from .env
+│   └── main.py                # FastAPI web service &amp; /api/runs REST/SSE endpoints
+├── agent/
+│   ├── __init__.py
+│   ├── graph.py               # ResearchWorkflow bounded state graph coordinator
+│   ├── nodes.py               # Discrete research stages (plan, discover, crawl, rank, synth, verify)
+│   └── state.py               # Typed ResearchState contract
+├── search/
+│   ├── __init__.py
+│   ├── duckduckgo_client.py   # Primary zero-API-key DuckDuckGo HTML/Lite scraper
+│   ├── news_client.py         # Public RSS/Atom news aggregator
+│   └── searxng_client.py      # Optional SearXNG metasearch client
+├── crawl/
+│   ├── __init__.py
+│   ├── extractor.py           # Trafilatura clean text and metadata extraction
+│   ├── fetcher.py             # Safe streaming HTTP fetcher with redirect revalidation
+│   └── policy.py              # SSRF defense, private IP validation, URL canonicalization
+├── retrieval/
+│   ├── __init__.py
+│   ├── chunking.py            # Passage chunking with character offsets and hashes
+│   ├── deduplication.py       # Canonical URL, SHA-256 hash, and 3-gram Jaccard deduplication
+│   └── ranking.py             # Pure-Python Okapi BM25 lexical ranking with domain boost
+├── evidence/
+│   ├── __init__.py
+│   ├── schemas.py             # Typed Pydantic models (Run, Document, Passage, Evidence, Citation)
+│   └── verifier.py            # Citation verification engine auditing against stored passages
+├── report/
+│   ├── __init__.py
+│   ├── exporter.py            # Multi-format exporter (Markdown, HTML, JSON, JSONL, Manifest)
+│   └── writer.py              # Report synthesis (Ollama LLM with extractive fallback)
+├── storage/
+│   ├── __init__.py
+│   ├── database.py            # SQLite schema initialization and connection management
+│   └── repository.py          # Typed repository for all relational entities
+├── tests/
+│   ├── __init__.py
+│   ├── test_api.py            # API endpoint integration and contract tests
+│   ├── test_evidence.py       # Chunking, deduplication, and citation verification tests
+│   ├── test_extractor.py      # Extraction tests against local HTML fixture
+│   ├── test_repository.py     # SQLite persistence and report serialization tests
+│   ├── test_search.py         # DuckDuckGo HTML/Lite parser tests
+│   └── fixtures/
+│       └── sample_article.html# Local test HTML article fixture
+├── ui/
+│   └── streamlit_app.py       # Fallback Streamlit prototype dashboard
+├── frontend/                  # React 19 single-page web application
+│   ├── index.html             # HTML entry point with Google Fonts
+│   ├── package.json           # Node.js dependencies (React 19, Vite, Tailwind, Framer Motion)
+│   ├── tsconfig.json          # TypeScript configuration
+│   ├── vite.config.ts         # Vite build configuration with API reverse proxy
+│   ├── tailwind.config.js     # Tailwind configuration with custom design tokens
+│   └── src/
+│       ├── main.tsx           # React mounting
+│       ├── App.tsx            # Route configuration
+│       ├── index.css          # Global styling and accessibility rules
+│       ├── tokens/
+│       │   └── tokens.ts      # Design tokens (colors, typography, verdict states)
+│       ├── types/
+│       │   └── api.ts         # TypeScript interface contracts
+│       ├── api/
+│       │   └── client.ts      # Typed API client with mock data provider guard
+│       ├── hooks/
+│       │   ├── useRunEvents.ts# Server-Sent Events client hook
+│       │   └── useHealthCheck.ts# Periodic API health probe hook
+│       ├── components/
+│       │   ├── home/          # Search bar, mode toggle, filter panel
+│       │   ├── live/          # Stage pipeline, stage node, source feed, log stream
+│       │   ├── results/       # Stat strip, report section, comparison table, drawer
+│       │   ├── sources/       # Academic card, source facet bar
+│       │   ├── audit/         # Audit table, audit row, summary strip
+│       │   ├── export/        # Export format download buttons
+│       │   ├── layout/        # RootLayout, ambient background scrim
+│       │   └── shared/        # ErrorCard, EmptyCard, ErrorBoundary, SkeletonBlock
+│       └── pages/
+│           ├── HomePage.tsx   # Search landing page with filters &amp; history
+│           ├── LiveRunPage.tsx# 8-stage progress monitoring view
+│           └── ResultsPage.tsx# Report view with synchronized evidence drawer
+├── docs/
+│   ├── architecture.md        # System architecture documentation
+│   ├── design-decisions.md    # Architectural trade-off analysis
+│   └── FINAL_PROJECT_REPORT.md# This revised technical report
+├── docker/
+│   └── searxng/
+│       └── settings.yml       # SearXNG configuration enabling JSON format
+├── docker-compose.yml         # Containerized SearXNG service definition
+├── requirements.txt           # Python backend dependencies
+├── .env.example               # Example configuration variables
+├── .gitignore                 # Version control exclusions
+├── LICENSE                    # MIT License
+└── README.md                  # System setup and execution guide
+</code></pre>
+<p>[INSERT FIGURE 15 HERE]</p>
+<p><strong>Figure 15.</strong> System architecture flow diagram.<br />
+<strong>Screenshot instructions:</strong> Render or capture the Mermaid architecture diagram illustrating data flow from the React client through the FastAPI ingress, research nodes, external connectors, and SQLite storage.</p>
+<hr />
+<p>[INSERT FIGURE 16 HERE]</p>
+<p><strong>Figure 16.</strong> Project directory structure view in Visual Studio Code.<br />
+<strong>Screenshot instructions:</strong> Capture the expanded file explorer tree in VS Code showing root modules, <code>app/</code>, <code>agent/</code>, <code>search/</code>, <code>crawl/</code>, <code>retrieval/</code>, <code>evidence/</code>, <code>report/</code>, <code>storage/</code>, <code>tests/</code>, and <code>frontend/</code>.</p>
+<hr />
+<h3 id="appendix-b-installation-setup-and-execution-instructions">Appendix B: Installation, Setup, and Execution Instructions</h3>
+<h4 id="1-python-environment-setup">1. Python Environment Setup</h4>
+<pre><code class="language-powershell"># Navigate to project root
+cd c:\Users\malik\Documents\agentic-web-research-engine
+
+# Verify Python version (Python 3.13)
+.\.venv\Scripts\python.exe --version
+
+# Install backend dependencies
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+</code></pre>
+<h4 id="2-environment-configuration">2. Environment Configuration</h4>
+<pre><code class="language-powershell"># Create local .env from example configuration
+Copy-Item .env.example .env
+</code></pre>
+<p>Key configuration settings in <code>.env</code>:</p>
+<pre><code class="language-ini">APP_NAME=&quot;Agentic Open-Source Web Research Engine&quot;
+DATABASE_PATH=research.db
+SEARCH_PROVIDER=duckduckgo
+DUCKDUCKGO_URL=https://html.duckduckgo.com/html/
+SEARXNG_URL=http://localhost:8080
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b
+MAX_SOURCES=10
+REQUEST_TIMEOUT=15
+</code></pre>
+<h4 id="3-executing-automated-tests">3. Executing Automated Tests</h4>
+<pre><code class="language-powershell">.\.venv\Scripts\python.exe -m pytest -v
+</code></pre>
+<h4 id="4-launching-the-backend-service-terminal-1">4. Launching the Backend Service (Terminal 1)</h4>
+<pre><code class="language-powershell">.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+</code></pre>
+<ul>
+<li>API Root: <code>http://localhost:8000/</code></li>
+<li>Health Probe: <code>http://localhost:8000/health</code></li>
+<li>OpenAPI Documentation: <code>http://localhost:8000/docs</code></li>
+</ul>
+<h4 id="5-launching-the-react-web-application-terminal-2">5. Launching the React Web Application (Terminal 2)</h4>
+<pre><code class="language-powershell">cd frontend
+npm install
+npm run dev
+</code></pre>
+<ul>
+<li>Open <code>http://localhost:5173</code> in a web browser.</li>
+</ul>
+</body>
+</html>
