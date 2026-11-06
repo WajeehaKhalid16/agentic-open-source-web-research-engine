@@ -1,0 +1,35 @@
+# Python virtual environment
+.venv/
+env/
+venv/
+ENV/
+
+# Byte-compiled and cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local environment configuration
+.env
+*.env.local
+
+# Local databases and SQLite files
+*.db
+*.sqlite
+*.sqlite3
+research.db
+
+# Generated reports and exports
+reports/
+exports/
+*.log
+
+# IDE and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
